@@ -33,6 +33,11 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/java.hpp"
 
+// LIRAN: for madvise; only available for linux
+#include <sys/mman.h>
+// LIRAN: for debugging
+#include <iostream>
+
 PSYoungGen::PSYoungGen(size_t        initial_size,
                        size_t        min_size,
                        size_t        max_size) :
@@ -51,6 +56,7 @@ void PSYoungGen::initialize_virtual_space(ReservedSpace rs, size_t alignment) {
 }
 
 void PSYoungGen::initialize(ReservedSpace rs, size_t alignment) {
+  init_ballon();
   initialize_virtual_space(rs, alignment);
   initialize_work();
 }
@@ -78,8 +84,9 @@ void PSYoungGen::initialize_work() {
   }
   _from_space = new MutableSpace(virtual_space()->alignment());
   _to_space   = new MutableSpace(virtual_space()->alignment());
+  _balloon_space = new MutableSpace(virtual_space()->alignment());
 
-  if (_eden_space == NULL || _from_space == NULL || _to_space == NULL) {
+  if (_eden_space == NULL || _from_space == NULL || _to_space == NULL || _balloon_space == NULL) {
     vm_exit_during_initialization("Could not allocate a young gen space");
   }
 
@@ -182,25 +189,32 @@ void PSYoungGen::set_space_boundaries(size_t eden_size, size_t survivor_size) {
   assert(eden_size < virtual_space()->committed_size(), "just checking");
   assert(eden_size > 0  && survivor_size > 0, "just checking");
 
+  balloon_current = balloon_target = os::vm_page_size() / HeapWordSize;
+  size_t balloon_size = balloon_current * HeapWordSize;
+
   // Initial layout is Eden, to, from. After swapping survivor spaces,
   // that leaves us with Eden, from, to, which is step one in our two
   // step resize-with-live-data procedure.
   char *eden_start = virtual_space()->low();
-  char *to_start   = eden_start + eden_size;
+  char *balloon_start = eden_start + (eden_size - balloon_size);
+  char *to_start   = balloon_start + (balloon_size);
   char *from_start = to_start   + survivor_size;
   char *from_end   = from_start + survivor_size;
 
   assert(from_end == virtual_space()->high(), "just checking");
   assert(is_object_aligned((intptr_t)eden_start), "checking alignment");
+  assert(is_object_aligned((intptr_t)balloon_start), "checking alignment");
   assert(is_object_aligned((intptr_t)to_start),   "checking alignment");
   assert(is_object_aligned((intptr_t)from_start), "checking alignment");
 
-  MemRegion eden_mr((HeapWord*)eden_start, (HeapWord*)to_start);
+  MemRegion eden_mr((HeapWord*)eden_start, (HeapWord*)balloon_start);
+  MemRegion balloon_mr((HeapWord*)balloon_start, (HeapWord*)to_start);
   MemRegion to_mr  ((HeapWord*)to_start, (HeapWord*)from_start);
   MemRegion from_mr((HeapWord*)from_start, (HeapWord*)from_end);
 
   eden_space()->initialize(eden_mr, true, ZapUnusedHeapArea);
-    to_space()->initialize(to_mr  , true, ZapUnusedHeapArea);
+  balloon_space()->initialize(balloon_mr, true, ZapUnusedHeapArea);
+  to_space()->initialize(to_mr  , true, ZapUnusedHeapArea);
   from_space()->initialize(from_mr, true, ZapUnusedHeapArea);
 }
 
@@ -211,12 +225,15 @@ void PSYoungGen::space_invariants() {
 
   // Currently, our eden size cannot shrink to zero
   guarantee(eden_space()->capacity_in_bytes() >= alignment, "eden too small");
+  //guarantee(balloon_space()->capacity_in_bytes() >= alignment, "balloon too small");
   guarantee(from_space()->capacity_in_bytes() >= alignment, "from too small");
   guarantee(to_space()->capacity_in_bytes() >= alignment, "to too small");
 
   // Relationship of spaces to each other
   char* eden_start = (char*)eden_space()->bottom();
   char* eden_end   = (char*)eden_space()->end();
+  char* balloon_start = (char*)balloon_space()->bottom();
+  char* balloon_end = (char*)balloon_space()->end();
   char* from_start = (char*)from_space()->bottom();
   char* from_end   = (char*)from_space()->end();
   char* to_start   = (char*)to_space()->bottom();
@@ -224,18 +241,21 @@ void PSYoungGen::space_invariants() {
 
   guarantee(eden_start >= virtual_space()->low(), "eden bottom");
   guarantee(eden_start < eden_end, "eden space consistency");
+  guarantee(balloon_start < balloon_end, "balloon space consistency");
   guarantee(from_start < from_end, "from space consistency");
   guarantee(to_start < to_end, "to space consistency");
 
   // Check whether from space is below to space
   if (from_start < to_start) {
-    // Eden, from, to
-    guarantee(eden_end <= from_start, "eden/from boundary");
+    // Eden, balloon, from, to
+    guarantee(eden_end <= balloon_start, "eden/balloon boundary");
+    guarantee(balloon_end <= from_start, "balloon/from boundary");
     guarantee(from_end <= to_start,   "from/to boundary");
     guarantee(to_end <= virtual_space()->high(), "to end");
   } else {
-    // Eden, to, from
-    guarantee(eden_end <= to_start, "eden/to boundary");
+    // Eden, balloon, to, from
+    guarantee(eden_end <= balloon_start, "eden/balloon boundary");
+    guarantee(balloon_end <= to_start, "balloon/to boundary");
     guarantee(to_end <= from_start, "to/from boundary");
     guarantee(from_end <= virtual_space()->high(), "from end");
   }
@@ -243,14 +263,17 @@ void PSYoungGen::space_invariants() {
   // More checks that the virtual space is consistent with the spaces
   assert(virtual_space()->committed_size() >=
     (eden_space()->capacity_in_bytes() +
+     balloon_space()->capacity_in_bytes() +
      to_space()->capacity_in_bytes() +
      from_space()->capacity_in_bytes()), "Committed size is inconsistent");
   assert(virtual_space()->committed_size() <= virtual_space()->reserved_size(),
     "Space invariant");
   char* eden_top = (char*)eden_space()->top();
+  char* balloon_top = (char*)balloon_space()->top();
   char* from_top = (char*)from_space()->top();
   char* to_top = (char*)to_space()->top();
   assert(eden_top <= virtual_space()->high(), "eden top");
+  assert(balloon_top <= virtual_space()->high(), "balloon top");
   assert(from_top <= virtual_space()->high(), "from top");
   assert(to_top <= virtual_space()->high(), "to top");
 
@@ -612,7 +635,7 @@ void PSYoungGen::resize_spaces(size_t requested_eden_size,
       eden_size = MIN2(requested_eden_size,
                        pointer_delta(to_start, eden_start, sizeof(char)));
     }
-    eden_end = eden_start + eden_size;
+    eden_end = eden_start + eden_size - balloon_space()->capacity_in_bytes();
     assert(eden_end >= eden_start, "addition overflowed");
 
     // Could choose to not let eden shrink
@@ -790,6 +813,8 @@ void PSYoungGen::compact() {
   from_mark_sweep()->compact(ZapUnusedHeapArea);
   // Mark sweep stores preserved markOops in to space, don't disturb!
   to_mark_sweep()->compact(false);
+
+  updateBallon();
 }
 
 void PSYoungGen::print() const { print_on(tty); }
@@ -803,9 +828,10 @@ void PSYoungGen::print_on(outputStream* st) const {
                capacity_in_bytes()/K, used_in_bytes()/K);
   }
   virtual_space()->print_space_boundaries_on(st);
-  st->print("  eden"); eden_space()->print_on(st);
-  st->print("  from"); from_space()->print_on(st);
-  st->print("  to  "); to_space()->print_on(st);
+  st->print("     eden"); eden_space()->print_on(st);
+  st->print("  balloon"); balloon_space()->print_on(st);
+  st->print("     from"); from_space()->print_on(st);
+  st->print("     to  "); to_space()->print_on(st);
 }
 
 void PSYoungGen::print_used_change(size_t prev_used) const {
@@ -951,3 +977,114 @@ void PSYoungGen::record_spaces_top() {
   to_space()->set_top_for_allocations();
 }
 #endif
+
+bool PSYoungGen::write_ballon_pipe(const char* pipeName, size_t newSize) {
+	if(pipeName == NULL) {
+		return false;
+	}
+
+	int pipe = os::open(pipeName, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to write to pipe: %s\n", pipeName);
+		return false;
+	}
+
+	char BUF[64];
+	sprintf(BUF, "%lu", newSize);
+	os::write(pipe, BUF, strlen(BUF));
+	os::close(pipe);
+
+	return true;
+}
+
+long PSYoungGen::read_ballon_pipe(const char* pipeName) {
+	if(pipeName == NULL) {
+		return -1;
+	}
+
+	int pipe = os::open(pipeName, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to read from pipe: %s\n", pipeName);
+		return -1;
+	}
+
+	char BUF[64];
+	size_t readCount = os::read(pipe, BUF, sizeof(BUF));
+	os::close(pipe);
+
+	if(readCount <= 0) {
+		return -1;
+	}
+
+	return atol(BUF);
+}
+
+void PSYoungGen::init_ballon() {
+	ballon_input_pipe_name = "/tmp/JavaBalloonInputSizePages";
+	ballon_output_pipe_name = "/tmp/JavaBalloonOutputSizePages";
+	
+	unlink(ballon_input_pipe_name);
+	unlink(ballon_output_pipe_name);
+
+	bool success = write_ballon_pipe(ballon_input_pipe_name, 1);
+	success &=  write_ballon_pipe(ballon_output_pipe_name, 1);
+
+	if(!success) {
+		unlink(ballon_input_pipe_name);
+		unlink(ballon_output_pipe_name);
+		ballon_input_pipe_name = NULL;
+		ballon_output_pipe_name = NULL;
+	}
+}
+
+void PSYoungGen::update_new_balloon_target() {
+	long new_target_in_pages = read_ballon_pipe(ballon_input_pipe_name);
+
+	if(new_target_in_pages < 0) {
+		return;
+	}
+
+	set_balloon_target((new_target_in_pages * os::vm_page_size()) / HeapWordSize);
+}
+
+void PSYoungGen::updateBallon() {
+	const static unsigned long long int balloonMask =
+			~((os::vm_page_size() / HeapWordSize) - 1);
+
+	update_new_balloon_target();
+
+	if(get_balloon_target() == get_balloon_current()) return;
+
+	{
+		MutexLocker x(ExpandHeap_lock);
+
+		size_t balloonCurrent = get_balloon_current();
+		size_t balloonTarget = get_balloon_target();
+
+		long long int delta = balloonTarget - balloonCurrent;
+		size_t available = eden_space()->free_in_words();
+		delta = MIN2(delta, (long long int)available);
+		long long int aligned_delta = delta & balloonMask;
+
+		if(aligned_delta == 0) {
+			return;
+		}
+
+		HeapWord* new_eden_end = (HeapWord*) (eden_space()->end() - aligned_delta);
+
+		eden_space()->set_end(new_eden_end);
+		balloon_space()->set_bottom(new_eden_end);
+		balloon_space()->set_top(new_eden_end);
+
+		balloon_current = balloonCurrent + aligned_delta;
+
+		write_ballon_pipe(ballon_output_pipe_name, (balloon_current * HeapWordSize) / os::vm_page_size());
+	}
+
+	printf("Actual balloon size=%lu\n", balloon_current << LogHeapWordSize);
+	print();
+
+	::madvise(balloon_space()->bottom(), balloon_space()->capacity_in_bytes(), MADV_DONTNEED);
+}

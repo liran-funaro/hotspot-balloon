@@ -893,11 +893,15 @@ char* Universe::preferred_heap_base(size_t heap_size, size_t alignment, NARROW_O
   return (char*)base; // also return NULL (don't care) for 32-bit VM
 }
 
+// LIRAN: for debug
+#include <iostream>
+
 jint Universe::initialize_heap() {
 
   if (UseParallelGC) {
 #ifndef SERIALGC
     Universe::_collectedHeap = new ParallelScavengeHeap();
+    printf("Use ParallelScavengeHeap - With Liran's Ballooning\n");
 #else  // SERIALGC
     fatal("UseParallelGC not supported in java kernel vm.");
 #endif // SERIALGC

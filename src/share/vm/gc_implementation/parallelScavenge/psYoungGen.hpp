@@ -46,6 +46,10 @@ class PSYoungGen : public CHeapObj<mtGC> {
   MutableSpace* _eden_space;
   MutableSpace* _from_space;
   MutableSpace* _to_space;
+  MutableSpace* _balloon_space;
+
+  size_t balloon_target;
+  size_t balloon_current;
 
 
   // MarkSweep Decorators
@@ -113,6 +117,7 @@ class PSYoungGen : public CHeapObj<mtGC> {
   MutableSpace*   eden_space() const    { return _eden_space; }
   MutableSpace*   from_space() const    { return _from_space; }
   MutableSpace*   to_space() const      { return _to_space; }
+  MutableSpace*   balloon_space() const      { return _balloon_space; }
   PSVirtualSpace* virtual_space() const { return _virtual_space; }
 
   // For Adaptive size policy
@@ -193,6 +198,21 @@ class PSYoungGen : public CHeapObj<mtGC> {
                         MemRegion s2MR) PRODUCT_RETURN;
 
   void record_spaces_top() PRODUCT_RETURN;
+
+  size_t get_balloon_target() { return balloon_target; };
+  size_t get_balloon_current() { return balloon_current; };
+  void set_balloon_target(size_t bytes) { this->balloon_target = bytes; };
+
+  const char* ballon_input_pipe_name;
+  const char* ballon_output_pipe_name;
+  
+  bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  long read_ballon_pipe(const char* pipeName);
+
+  void init_ballon();
+  void update_new_balloon_target();
+
+  void updateBallon();
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PSYOUNGGEN_HPP
