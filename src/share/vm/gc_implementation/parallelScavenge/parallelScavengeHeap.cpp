@@ -45,6 +45,9 @@
 #include "services/memTracker.hpp"
 #include "utilities/vmError.hpp"
 
+// LIRAN
+#include <iostream>
+
 PSYoungGen*  ParallelScavengeHeap::_young_gen = NULL;
 PSOldGen*    ParallelScavengeHeap::_old_gen = NULL;
 PSPermGen*   ParallelScavengeHeap::_perm_gen = NULL;
@@ -77,9 +80,9 @@ jint ParallelScavengeHeap::initialize() {
   // GenerationSizer flag_parser;
   _collector_policy = new GenerationSizer();
 
-  size_t yg_min_size = _collector_policy->min_young_gen_size();
+  size_t yg_min_size = _collector_policy->max_young_gen_size();
   size_t yg_max_size = _collector_policy->max_young_gen_size();
-  size_t og_min_size = _collector_policy->min_old_gen_size();
+  size_t og_min_size = _collector_policy->max_old_gen_size();
   size_t og_max_size = _collector_policy->max_old_gen_size();
   // Why isn't there a min_perm_gen_size()?
   size_t pg_min_size = _collector_policy->perm_gen_size();

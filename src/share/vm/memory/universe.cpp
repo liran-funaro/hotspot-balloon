@@ -895,8 +895,10 @@ char* Universe::preferred_heap_base(size_t heap_size, size_t alignment, NARROW_O
 
 jint Universe::initialize_heap() {
 
+  printf("called initialize_heap\n");
   if (UseParallelGC) {
 #ifndef SERIALGC
+    printf("Parallel Scavenge\n");
     Universe::_collectedHeap = new ParallelScavengeHeap();
 #else  // SERIALGC
     fatal("UseParallelGC not supported in java kernel vm.");
@@ -904,6 +906,7 @@ jint Universe::initialize_heap() {
 
   } else if (UseG1GC) {
 #ifndef SERIALGC
+    printf("G1\n");
     G1CollectorPolicy* g1p = new G1CollectorPolicy();
     G1CollectedHeap* g1h = new G1CollectedHeap(g1p);
     Universe::_collectedHeap = g1h;
@@ -915,9 +918,11 @@ jint Universe::initialize_heap() {
     GenCollectorPolicy *gc_policy;
 
     if (UseSerialGC) {
+      printf("Serial\n");
       gc_policy = new MarkSweepPolicy();
     } else if (UseConcMarkSweepGC) {
 #ifndef SERIALGC
+      printf("CMS\n");
       if (UseAdaptiveSizePolicy) {
         gc_policy = new ASConcurrentMarkSweepPolicy();
       } else {
@@ -927,6 +932,7 @@ jint Universe::initialize_heap() {
     fatal("UseConcMarkSweepGC not supported in java kernel vm.");
 #endif // SERIALGC
     } else { // default old generation
+      printf("Serial\n");
       gc_policy = new MarkSweepPolicy();
     }
 

@@ -47,6 +47,11 @@ class PSOldGen : public CHeapObj<mtGC> {
   MutableSpace*            _object_space;      // Where all the objects live
   PSMarkSweepDecorator*    _object_mark_sweep; // The mark sweep view of _object_space
   const char* const        _name;              // Name of this generation.
+  MutableSpace* _balloon_space;
+
+  size_t balloon_target;
+  size_t balloon_current;
+
 
   // Performance Counters
   PSGenerationCounters*    _gen_counters;
@@ -130,6 +135,7 @@ class PSOldGen : public CHeapObj<mtGC> {
   }
 
   MutableSpace*         object_space() const      { return _object_space; }
+  MutableSpace*   balloon_space() const      { return _balloon_space; }
   PSMarkSweepDecorator* object_mark_sweep() const { return _object_mark_sweep; }
   ObjectStartArray*     start_array()             { return &_start_array; }
   PSVirtualSpace*       virtual_space() const     { return _virtual_space;}
@@ -195,6 +201,20 @@ class PSOldGen : public CHeapObj<mtGC> {
   // Debugging support
   // Save the tops of all spaces for later use during mangling.
   void record_spaces_top() PRODUCT_RETURN;
+  size_t get_balloon_target() { return balloon_target; };
+  size_t get_balloon_current() { return balloon_current; };
+  void set_balloon_target(size_t bytes) { this->balloon_target = bytes; };
+
+  const char* ballon_input_pipe_name;
+  const char* ballon_output_pipe_name;
+  
+  bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  long read_ballon_pipe(const char* pipeName);
+
+  void init_ballon();
+  void update_new_balloon_target();
+
+  void updateBallon();
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PSOLDGEN_HPP

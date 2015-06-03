@@ -33,6 +33,11 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/java.hpp"
 
+// LIRAN: for madvise; only available for linux
+#include <sys/mman.h>
+// LIRAN: for debugging
+#include <iostream>
+
 inline const char* PSOldGen::select_name() {
   return UseParallelOldGC ? "ParOldGen" : "PSOldGen";
 }
@@ -55,6 +60,7 @@ PSOldGen::PSOldGen(size_t initial_size,
 
 void PSOldGen::initialize(ReservedSpace rs, size_t alignment,
                           const char* perf_data_name, int level) {
+  init_ballon();
   initialize_virtual_space(rs, alignment);
   initialize_work(perf_data_name, level);
   // The old gen can grow to gen_size_limit().  _reserve reflects only
@@ -93,8 +99,12 @@ void PSOldGen::initialize_work(const char* perf_data_name, int level) {
   // Card table stuff
   //
 
+  balloon_current = balloon_target = os::vm_page_size() / HeapWordSize;
+  HeapWord* object_high = ((HeapWord*)virtual_space()->high()) - balloon_current;
   MemRegion cmr((HeapWord*)virtual_space()->low(),
-                (HeapWord*)virtual_space()->high());
+                object_high);
+  MemRegion balloon_mr(object_high, 
+		       (HeapWord*)virtual_space()->high());
   if (ZapUnusedHeapArea) {
     // Mangle newly committed space immediately rather than
     // waiting for the initialization of the space even though
@@ -125,13 +135,17 @@ void PSOldGen::initialize_work(const char* perf_data_name, int level) {
   //
 
   _object_space = new MutableSpace(virtual_space()->alignment());
+  _balloon_space = new MutableSpace(virtual_space()->alignment());
 
-  if (_object_space == NULL)
+  if (_object_space == NULL || _balloon_space == NULL)
     vm_exit_during_initialization("Could not allocate an old gen space");
 
   object_space()->initialize(cmr,
                              SpaceDecorator::Clear,
                              SpaceDecorator::Mangle);
+  balloon_space()->initialize(balloon_mr,
+			      true,
+			      ZapUnusedHeapArea);
 
   _object_mark_sweep = new PSMarkSweepDecorator(_object_space, start_array(), MarkSweepDeadRatio);
 
@@ -174,6 +188,7 @@ void PSOldGen::adjust_pointers() {
 
 void PSOldGen::compact() {
   object_mark_sweep()->compact(ZapUnusedHeapArea);
+  updateBallon();
 }
 
 size_t PSOldGen::contiguous_available() const {
@@ -437,7 +452,9 @@ void PSOldGen::print_on(outputStream* st) const {
                 virtual_space()->high(),
                 virtual_space()->high_boundary());
 
-  st->print("  object"); object_space()->print_on(st);
+  st->print("   object"); object_space()->print_on(st);
+  st->print("  balloon"); balloon_space()->print_on(st);
+
 }
 
 void PSOldGen::print_used_change(size_t prev_used) const {
@@ -506,3 +523,114 @@ void PSOldGen::record_spaces_top() {
   object_space()->set_top_for_allocations();
 }
 #endif
+
+bool PSOldGen::write_ballon_pipe(const char* pipeName, size_t newSize) {
+	if(pipeName == NULL) {
+		return false;
+	}
+
+	int pipe = os::open(pipeName, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to write to pipe: %s\n", pipeName);
+		return false;
+	}
+
+	char BUF[64];
+	sprintf(BUF, "%lu", newSize);
+	os::write(pipe, BUF, strlen(BUF));
+	os::close(pipe);
+
+	return true;
+}
+
+long PSOldGen::read_ballon_pipe(const char* pipeName) {
+	if(pipeName == NULL) {
+		return -1;
+	}
+
+	int pipe = os::open(pipeName, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to read from pipe: %s\n", pipeName);
+		return -1;
+	}
+
+	char BUF[64];
+	size_t readCount = os::read(pipe, BUF, sizeof(BUF));
+	os::close(pipe);
+
+	if(readCount <= 0) {
+		return -1;
+	}
+
+	return atol(BUF);
+}
+
+void PSOldGen::init_ballon() {
+	ballon_input_pipe_name = "/tmp/JavaBalloonInputSizePages";
+	ballon_output_pipe_name = "/tmp/JavaBalloonOutputSizePages";
+	
+	unlink(ballon_input_pipe_name);
+	unlink(ballon_output_pipe_name);
+
+	bool success = write_ballon_pipe(ballon_input_pipe_name, 1);
+	success &=  write_ballon_pipe(ballon_output_pipe_name, 1);
+
+	if(!success) {
+		unlink(ballon_input_pipe_name);
+		unlink(ballon_output_pipe_name);
+		ballon_input_pipe_name = NULL;
+		ballon_output_pipe_name = NULL;
+	}
+}
+
+void PSOldGen::update_new_balloon_target() {
+	long new_target_in_pages = read_ballon_pipe(ballon_input_pipe_name);
+
+	if(new_target_in_pages < 0) {
+		return;
+	}
+
+	set_balloon_target((new_target_in_pages * os::vm_page_size()) / HeapWordSize);
+}
+
+void PSOldGen::updateBallon() {
+	const static unsigned long long int balloonMask =
+			~((os::vm_page_size() / HeapWordSize) - 1);
+
+	update_new_balloon_target();
+
+	if(get_balloon_target() == get_balloon_current()) return;
+
+	{
+		MutexLocker x(ExpandHeap_lock);
+
+		size_t balloonCurrent = get_balloon_current();
+		size_t balloonTarget = get_balloon_target();
+
+		long long int delta = balloonTarget - balloonCurrent;
+		size_t available = object_space()->free_in_words();
+		delta = MIN2(delta, (long long int)available);
+		long long int aligned_delta = delta & balloonMask;
+
+		if(aligned_delta == 0) {
+			return;
+		}
+
+		HeapWord* new_object_end = (HeapWord*) (object_space()->end() - aligned_delta);
+
+		object_space()->set_end(new_object_end);
+		balloon_space()->set_bottom(new_object_end);
+		balloon_space()->set_top(new_object_end);
+
+		balloon_current = balloonCurrent + aligned_delta;
+
+		write_ballon_pipe(ballon_output_pipe_name, (balloon_current * HeapWordSize) / os::vm_page_size());
+	}
+
+	printf("Actual balloon size=%lu\n", balloon_current << LogHeapWordSize);
+	print();
+
+	::madvise(balloon_space()->bottom(), balloon_space()->capacity_in_bytes(), MADV_DONTNEED);
+}
