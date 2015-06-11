@@ -568,8 +568,8 @@ long PSOldGen::read_ballon_pipe(const char* pipeName) {
 }
 
 void PSOldGen::init_ballon() {
-	ballon_input_pipe_name = "/tmp/JavaBalloonInputSizePages";
-	ballon_output_pipe_name = "/tmp/JavaBalloonOutputSizePages";
+	ballon_input_pipe_name = "/tmp/JavaOldBalloonInputSizePages";
+	ballon_output_pipe_name = "/tmp/JavaOldBalloonOutputSizePages";
 	
 	unlink(ballon_input_pipe_name);
 	unlink(ballon_output_pipe_name);
