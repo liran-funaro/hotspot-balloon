@@ -290,7 +290,11 @@ void PSAdaptiveSizePolicy::compute_generation_free_space(
   clear_generation_free_space_flags();
 
   // Limits on our growth
-  size_t promo_limit = (size_t)(max_old_gen_size - avg_old_live()->average());
+//  size_t promo_limit = (size_t)(max_old_gen_size - avg_old_live()->average());
+  size_t promo_limit = 0;
+  if (max_old_gen_size > avg_old_live()->average()) {
+	  promo_limit = (size_t)(max_old_gen_size - avg_old_live()->average());
+  }
 
   // This method sets the desired eden size.  That plus the
   // desired survivor space sizes sets the desired young generation

@@ -897,6 +897,7 @@ jint Universe::initialize_heap() {
 
   if (UseParallelGC) {
 #ifndef SERIALGC
+    printf("Parallel Scavenge: using ballooning\n");
     Universe::_collectedHeap = new ParallelScavengeHeap();
 #else  // SERIALGC
     fatal("UseParallelGC not supported in java kernel vm.");

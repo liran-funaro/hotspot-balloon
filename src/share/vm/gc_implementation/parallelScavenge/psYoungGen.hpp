@@ -47,6 +47,8 @@ class PSYoungGen : public CHeapObj<mtGC> {
   MutableSpace* _from_space;
   MutableSpace* _to_space;
 
+  size_t _balloon_size;
+
 
   // MarkSweep Decorators
   PSMarkSweepDecorator* _eden_mark_sweep;
@@ -146,11 +148,11 @@ class PSYoungGen : public CHeapObj<mtGC> {
   size_t free_in_words() const;
 
   // The max this generation can grow to
-  size_t max_size() const            { return _reserved.byte_size(); }
+  size_t max_size() const            { return MAX2(_reserved.byte_size() - _balloon_size, capacity_in_bytes()); }
 
   // The max this generation can grow to if the boundary between
   // the generations are allowed to move.
-  size_t gen_size_limit() const { return _max_gen_size; }
+  size_t gen_size_limit() const { return MAX2(_max_gen_size - _balloon_size, capacity_in_bytes()); }
 
   bool is_maximal_no_gc() const {
     return true;  // never expands except at a GC
@@ -193,6 +195,17 @@ class PSYoungGen : public CHeapObj<mtGC> {
                         MemRegion s2MR) PRODUCT_RETURN;
 
   void record_spaces_top() PRODUCT_RETURN;
+  size_t balloon_size() { return _balloon_size; };
+  void set_balloon_size(size_t bytes) { _balloon_size = bytes; };
+
+  const char* ballon_input_pipe_name;
+  const char* ballon_output_pipe_name;
+
+  bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  long read_ballon_pipe(const char* pipeName);
+
+  void init_ballon();
+  void update_balloon();
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PSYOUNGGEN_HPP

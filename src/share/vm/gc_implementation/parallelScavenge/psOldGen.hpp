@@ -48,6 +48,8 @@ class PSOldGen : public CHeapObj<mtGC> {
   PSMarkSweepDecorator*    _object_mark_sweep; // The mark sweep view of _object_space
   const char* const        _name;              // Name of this generation.
 
+  size_t _balloon_size;
+
   // Performance Counters
   PSGenerationCounters*    _gen_counters;
   SpaceCounters*           _space_counters;
@@ -113,7 +115,7 @@ class PSOldGen : public CHeapObj<mtGC> {
   void initialize_work(const char* perf_data_name, int level);
 
   MemRegion reserved() const                { return _reserved; }
-  virtual size_t max_gen_size()             { return _max_gen_size; }
+  virtual size_t max_gen_size()             { return MAX2(_max_gen_size - _balloon_size, used_in_bytes()); }
   size_t min_gen_size()                     { return _min_gen_size; }
 
   // Returns limit on the maximum size of the generation.  This
@@ -195,6 +197,17 @@ class PSOldGen : public CHeapObj<mtGC> {
   // Debugging support
   // Save the tops of all spaces for later use during mangling.
   void record_spaces_top() PRODUCT_RETURN;
+  size_t balloon_size() { return _balloon_size; };
+  void set_balloon_size(size_t bytes) { _balloon_size = bytes; };
+
+  const char* ballon_input_pipe_name;
+  const char* ballon_output_pipe_name;
+
+  bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  long read_ballon_pipe(const char* pipeName);
+
+  void init_ballon();
+  void update_balloon();
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PSOLDGEN_HPP

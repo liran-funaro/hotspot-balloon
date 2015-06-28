@@ -55,6 +55,7 @@ PSOldGen::PSOldGen(size_t initial_size,
 
 void PSOldGen::initialize(ReservedSpace rs, size_t alignment,
                           const char* perf_data_name, int level) {
+  init_ballon();
   initialize_virtual_space(rs, alignment);
   initialize_work(perf_data_name, level);
   // The old gen can grow to gen_size_limit().  _reserve reflects only
@@ -173,6 +174,7 @@ void PSOldGen::adjust_pointers() {
 }
 
 void PSOldGen::compact() {
+  update_balloon();
   object_mark_sweep()->compact(ZapUnusedHeapArea);
 }
 
@@ -404,7 +406,7 @@ void PSOldGen::post_resize() {
 }
 
 size_t PSOldGen::gen_size_limit() {
-  return _max_gen_size;
+  return MAX2(_max_gen_size - _balloon_size, used_in_bytes());
 }
 
 void PSOldGen::reset_after_change() {
@@ -506,3 +508,80 @@ void PSOldGen::record_spaces_top() {
   object_space()->set_top_for_allocations();
 }
 #endif
+
+long PSOldGen::read_ballon_pipe(const char* pipeName) {
+	if(pipeName == NULL) {
+		return -1;
+	}
+
+	int pipe = os::open(pipeName, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to read from pipe: %s\n", pipeName);
+		return -1;
+	}
+
+	char BUF[64];
+	size_t readCount = os::read(pipe, BUF, sizeof(BUF));
+	os::close(pipe);
+
+	if(readCount <= 0) {
+		return -1;
+	}
+
+	return atol(BUF);
+}
+
+bool PSOldGen::write_ballon_pipe(const char* pipeName, size_t newSize) {
+	if(pipeName == NULL) {
+		return false;
+	}
+
+	int pipe = os::open(pipeName, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to write to pipe: %s\n", pipeName);
+		return false;
+	}
+
+	char BUF[64];
+	sprintf(BUF, "%lu", newSize);
+	os::write(pipe, BUF, strlen(BUF));
+	os::close(pipe);
+
+	return true;
+}
+
+void PSOldGen::init_ballon() {
+	set_balloon_size(0);
+	ballon_input_pipe_name = "/tmp/JavaOldBalloonInputSizePages";
+	ballon_output_pipe_name = "/tmp/JavaOldBalloonOutputSizePages";
+
+	unlink(ballon_input_pipe_name);
+	unlink(ballon_output_pipe_name);
+
+	bool success = write_ballon_pipe(ballon_input_pipe_name, 0);
+	success &=  write_ballon_pipe(ballon_output_pipe_name, 0);
+
+	if(!success) {
+		unlink(ballon_input_pipe_name);
+		unlink(ballon_output_pipe_name);
+		ballon_input_pipe_name = NULL;
+		ballon_output_pipe_name = NULL;
+	}
+}
+
+void PSOldGen::update_balloon() {
+	long read_balloon_size = read_ballon_pipe(ballon_input_pipe_name);
+
+	if(read_balloon_size < 0) {
+		return;
+	}
+	// safe guard: balloon size can't be greater than max gen size
+	size_t new_balloon_size = (size_t) read_balloon_size;
+	if (new_balloon_size > _max_gen_size) {
+		new_balloon_size = _max_gen_size;
+	}
+	set_balloon_size(new_balloon_size);
+//	printf("Updated balloon size in bytes:%zu\n", _balloon_size);
+}
