@@ -148,11 +148,11 @@ class PSYoungGen : public CHeapObj<mtGC> {
   size_t free_in_words() const;
 
   // The max this generation can grow to
-  size_t max_size() const            { return MAX2(_reserved.byte_size() - _balloon_size, capacity_in_bytes()); }
+  size_t max_size() const            { return align_size_up(MAX2(_reserved.byte_size() - _balloon_size, capacity_in_bytes()), virtual_space()->alignment()); }
 
   // The max this generation can grow to if the boundary between
   // the generations are allowed to move.
-  size_t gen_size_limit() const { return MAX2(_max_gen_size - _balloon_size, capacity_in_bytes()); }
+  size_t gen_size_limit() const { return align_size_up(MAX2(_max_gen_size - _balloon_size, capacity_in_bytes()), virtual_space()->alignment()); }
 
   bool is_maximal_no_gc() const {
     return true;  // never expands except at a GC
@@ -195,17 +195,15 @@ class PSYoungGen : public CHeapObj<mtGC> {
                         MemRegion s2MR) PRODUCT_RETURN;
 
   void record_spaces_top() PRODUCT_RETURN;
+
   size_t balloon_size() { return _balloon_size; };
-  void set_balloon_size(size_t bytes) { _balloon_size = bytes; };
-
-  const char* ballon_input_pipe_name;
-  const char* ballon_output_pipe_name;
-
-  bool write_ballon_pipe(const char* pipeName, size_t newSize);
-  long read_ballon_pipe(const char* pipeName);
-
-  void init_ballon();
-  void update_balloon();
+  void init_ballon() {set_balloon_size(0); };
+  void set_balloon_size(size_t bytes) {
+  	size_t new_size = MIN2(bytes, _max_gen_size);
+  	new_size = align_size_down(new_size, virtual_space()->alignment());
+  	_balloon_size = new_size;
+  	printf("set young balloon size in bytes:%zu\n", _balloon_size);
+  }
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PSYOUNGGEN_HPP

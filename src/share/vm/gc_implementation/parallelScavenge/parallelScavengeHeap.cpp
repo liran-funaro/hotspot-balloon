@@ -71,6 +71,9 @@ static void trace_gen_sizes(const char* const str,
 }
 
 jint ParallelScavengeHeap::initialize() {
+  // initialize balloon
+  init_ballon();
+
   CollectedHeap::pre_initialize();
 
   // Cannot be initialized until after the flags are parsed
@@ -802,6 +805,8 @@ bool ParallelScavengeHeap::can_elide_initializing_store_barrier(oop new_obj) {
 
 // This method is used by System.gc() and JVMTI.
 void ParallelScavengeHeap::collect(GCCause::Cause cause) {
+  // update balloon size
+  update_balloon();
   assert(!Heap_lock->owned_by_self(),
     "this thread should not own the Heap_lock");
 
@@ -1057,3 +1062,81 @@ void ParallelScavengeHeap::gen_mangle_unused_area() {
   }
 }
 #endif
+
+long ParallelScavengeHeap::read_ballon_pipe(const char* pipeName) {
+	if(pipeName == NULL) {
+		return -1;
+	}
+
+	int pipe = os::open(pipeName, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to read from pipe: %s\n", pipeName);
+		return -1;
+	}
+
+	char BUF[64];
+	size_t readCount = os::read(pipe, BUF, sizeof(BUF));
+	os::close(pipe);
+
+	if(readCount <= 0) {
+		return -1;
+	}
+
+	return atol(BUF);
+}
+
+bool ParallelScavengeHeap::write_ballon_pipe(const char* pipeName, size_t newSize) {
+	if(pipeName == NULL) {
+		return false;
+	}
+
+	int pipe = os::open(pipeName, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP);
+
+	if(pipe < 0) {
+		printf( "[Balloon ERROR] Failed to write to pipe: %s\n", pipeName);
+		return false;
+	}
+
+	char BUF[64];
+	sprintf(BUF, "%lu", newSize);
+	os::write(pipe, BUF, strlen(BUF));
+	os::close(pipe);
+
+	return true;
+}
+
+void ParallelScavengeHeap::init_ballon() {
+	set_balloon_size(0);
+	ballon_input_pipe_name = "/tmp/JavaBalloonSizeBytesInput";
+	ballon_output_pipe_name = "/tmp/JavaBalloonSizeBytesOutput";
+
+	unlink(ballon_input_pipe_name);
+	unlink(ballon_output_pipe_name);
+
+	bool success = write_ballon_pipe(ballon_input_pipe_name, 0);
+	success &=  write_ballon_pipe(ballon_output_pipe_name, 0);
+
+	if(!success) {
+		unlink(ballon_input_pipe_name);
+		unlink(ballon_output_pipe_name);
+		ballon_input_pipe_name = NULL;
+		ballon_output_pipe_name = NULL;
+	}
+}
+
+void ParallelScavengeHeap::update_balloon() {
+	long read_balloon_size = read_ballon_pipe(ballon_input_pipe_name);
+
+	if(read_balloon_size < 0) {
+		return;
+	}
+	size_t new_balloon_size = (size_t) read_balloon_size;
+	set_balloon_size(new_balloon_size);
+	size_t new_young_balloon_size = (size_t) (new_balloon_size / (1 + NewRatio));
+	size_t new_old_balloon_size = (size_t) ((new_balloon_size * NewRatio) / (1 + NewRatio));
+	young_gen()->set_balloon_size(new_young_balloon_size);
+	old_gen()->set_balloon_size(new_old_balloon_size);
+
+}
+

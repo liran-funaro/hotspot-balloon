@@ -82,6 +82,8 @@ class ParallelScavengeHeap : public CollectedHeap {
   inline void death_march_check(HeapWord* const result, size_t size);
   HeapWord* mem_allocate_old_gen(size_t size);
 
+  size_t _balloon_size;
+
  public:
   ParallelScavengeHeap() : CollectedHeap() {
     _death_march_count = 0;
@@ -289,6 +291,19 @@ CollectorPolicy* collector_policy() const { return (CollectorPolicy*) _collector
     ParStrongRootsScope();
     ~ParStrongRootsScope();
   };
+
+  // ballooning functionality
+  size_t balloon_size() { return _balloon_size; };
+  void set_balloon_size(size_t bytes) { _balloon_size = bytes; 	printf("set total balloon size in bytes:%zu\n", _balloon_size); };
+
+  const char* ballon_input_pipe_name;
+  const char* ballon_output_pipe_name;
+
+  bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  long read_ballon_pipe(const char* pipeName);
+
+  void init_ballon();
+  void update_balloon();
 };
 
 inline size_t ParallelScavengeHeap::set_alignment(size_t& var, size_t val)
