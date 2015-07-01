@@ -204,7 +204,7 @@ class PSOldGen : public CHeapObj<mtGC> {
   	size_t new_size = MIN2(bytes, _max_gen_size);
   	new_size = align_size_down(new_size, virtual_space()->alignment());
   	_balloon_size = new_size;
-  	printf("set old balloon size in bytes:%zu\n", _balloon_size);
+//  	printf("set old balloon size in bytes:%zu\n", _balloon_size);
   }
 };
 

@@ -294,7 +294,10 @@ CollectorPolicy* collector_policy() const { return (CollectorPolicy*) _collector
 
   // ballooning functionality
   size_t balloon_size() { return _balloon_size; };
-  void set_balloon_size(size_t bytes) { _balloon_size = bytes; 	printf("set total balloon size in bytes:%zu\n", _balloon_size); };
+  void set_balloon_size(size_t bytes) {
+    _balloon_size = bytes;
+//    printf("set total balloon size in bytes:%zu\n", _balloon_size);
+  }
 
   const char* ballon_input_pipe_name;
   const char* ballon_output_pipe_name;
