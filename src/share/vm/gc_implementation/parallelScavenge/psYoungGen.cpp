@@ -352,11 +352,6 @@ bool PSYoungGen::resize_generation(size_t eden_size, size_t survivor_size) {
     }
   }
 
-
-
-  printf("eden+survivors=%zu\n", eden_plus_survivors);
-  printf("committed=%zu\n", virtual_space()->committed_size());
-  printf("max=%zu\n", max_size());
   guarantee(eden_plus_survivors <= virtual_space()->committed_size() ||
             virtual_space()->committed_size() == max_size(), "Sanity");
 
@@ -834,7 +829,7 @@ size_t PSYoungGen::available_for_contraction() {
   return 0;
 }
 
-size_t PSYoungGen::available_to_min_gen() {
+size_t PSYoungGen::available_to_min_gen() const {
   assert(virtual_space()->committed_size() >= min_gen_size(), "Invariant");
   return virtual_space()->committed_size() - min_gen_size();
 }
@@ -842,7 +837,7 @@ size_t PSYoungGen::available_to_min_gen() {
 // This method assumes that from-space has live data and that
 // any shrinkage of the young gen is limited by location of
 // from-space.
-size_t PSYoungGen::available_to_live() {
+size_t PSYoungGen::available_to_live() const {
   size_t delta_in_survivor = 0;
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
   const size_t space_alignment = heap->intra_heap_alignment();
@@ -883,7 +878,7 @@ size_t PSYoungGen::available_to_live() {
 //      input "bytes"
 //      bytes to the minimum young gen size
 //      bytes to the size currently being used + some small extra
-size_t PSYoungGen::limit_gen_shrink(size_t bytes) {
+size_t PSYoungGen::limit_gen_shrink(size_t bytes) const {
   // Allow shrinkage into the current eden but keep eden large enough
   // to maintain the minimum young gen size
   bytes = MIN3(bytes, available_to_min_gen(), available_to_live());

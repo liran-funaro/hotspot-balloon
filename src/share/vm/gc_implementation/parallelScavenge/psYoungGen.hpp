@@ -85,13 +85,13 @@ class PSYoungGen : public CHeapObj<mtGC> {
 
   // Given a desired shrinkage in the size of the young generation,
   // return the actual size available for shrinkage.
-  virtual size_t limit_gen_shrink(size_t desired_change);
+  virtual size_t limit_gen_shrink(size_t desired_change) const;
   // returns the number of bytes available from the current size
   // down to the minimum generation size.
-  size_t available_to_min_gen();
+  size_t available_to_min_gen() const;
   // Return the number of bytes available for shrinkage considering
   // the location the live data in the generation.
-  virtual size_t available_to_live();
+  virtual size_t available_to_live() const;
 
  public:
   // Initialize the generation.
@@ -118,7 +118,7 @@ class PSYoungGen : public CHeapObj<mtGC> {
   PSVirtualSpace* virtual_space() const { return _virtual_space; }
 
   // For Adaptive size policy
-  size_t min_gen_size() { return _min_gen_size; }
+  size_t min_gen_size() const { return _min_gen_size; }
 
   // MarkSweep support
   PSMarkSweepDecorator* eden_mark_sweep() const    { return _eden_mark_sweep; }
@@ -148,11 +148,23 @@ class PSYoungGen : public CHeapObj<mtGC> {
   size_t free_in_words() const;
 
   // The max this generation can grow to
-  size_t max_size() const            { return align_size_up(MAX2(_reserved.byte_size() - _balloon_size, capacity_in_bytes()), virtual_space()->alignment()); }
+  size_t max_size() const {
+	  // we could call limit_gen_shrink(_balloon_size - uncommitted), but the
+	  // result will be the same due to the MAX2 later.
+  	  size_t lower_bound = virtual_space()->committed_size() - limit_gen_shrink(_balloon_size);
+  	  size_t ballooned_size = MAX2(_reserved.byte_size() - _balloon_size, lower_bound);
+  	  return align_size_up(ballooned_size, virtual_space()->alignment());
+  }
 
   // The max this generation can grow to if the boundary between
   // the generations are allowed to move.
-  size_t gen_size_limit() const { return align_size_up(MAX2(_max_gen_size - _balloon_size, capacity_in_bytes()), virtual_space()->alignment()); }
+  size_t gen_size_limit() const {
+	  // we could call limit_gen_shrink(_balloon_size - uncommitted), but the
+	  // result will be the same due to the MAX2 later.
+  	  size_t lower_bound = virtual_space()->committed_size() - limit_gen_shrink(_balloon_size);
+  	  size_t ballooned_size = MAX2(_max_gen_size - _balloon_size, lower_bound);
+  	  return align_size_up(ballooned_size, virtual_space()->alignment());
+  }
 
   bool is_maximal_no_gc() const {
     return true;  // never expands except at a GC
@@ -196,7 +208,7 @@ class PSYoungGen : public CHeapObj<mtGC> {
 
   void record_spaces_top() PRODUCT_RETURN;
 
-  size_t balloon_size() { return _balloon_size; };
+  size_t balloon_size() const { return _balloon_size; };
   void init_ballon() {set_balloon_size(0); };
   void set_balloon_size(size_t bytes) {
   	size_t new_size = MIN2(bytes, _max_gen_size);
