@@ -82,6 +82,8 @@ class ParallelScavengeHeap : public CollectedHeap {
   inline void death_march_check(HeapWord* const result, size_t size);
   HeapWord* mem_allocate_old_gen(size_t size);
 
+  // BALLOONING, YI REN
+  // The total desired balloon size. Currently it is not used but may be useful later.
   size_t _balloon_size;
 
  public:
@@ -292,20 +294,25 @@ CollectorPolicy* collector_policy() const { return (CollectorPolicy*) _collector
     ~ParStrongRootsScope();
   };
 
+  // BALLOONING, YI REN
   // ballooning functionality
+  // get balloon size
   size_t balloon_size() { return _balloon_size; };
+  // set balloon size to bytes
   void set_balloon_size(size_t bytes) {
     _balloon_size = bytes;
 //    printf("set total balloon size in bytes:%zu\n", _balloon_size);
   }
-
+  // input/output pipes' path
   const char* ballon_input_pipe_name;
   const char* ballon_output_pipe_name;
-
+  // write current balloon size to output pipe (not used)
   bool write_ballon_pipe(const char* pipeName, size_t newSize);
+  // read desired  balloon size from input pipe.
   long read_ballon_pipe(const char* pipeName);
-
-  void init_ballon();
+  // initialize the balloon pipes.
+  void init_balloon_pipes();
+  // Updates _balloon_size, young_gen()->_balloon_size and old_gen()->_balloon_size.
   void update_balloon();
 };
 

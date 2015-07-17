@@ -51,7 +51,10 @@ void PSYoungGen::initialize_virtual_space(ReservedSpace rs, size_t alignment) {
 }
 
 void PSYoungGen::initialize(ReservedSpace rs, size_t alignment) {
-  init_ballon();
+  // BALLOONING, YI REN
+  // set _balloon_size to 0. This variable is used later in initialization
+  // by max_gen_size(). So we should do it early.
+  init_balloon();
   initialize_virtual_space(rs, alignment);
   initialize_work();
 }
@@ -829,6 +832,8 @@ size_t PSYoungGen::available_for_contraction() {
   return 0;
 }
 
+// BALLOONING, YI REN
+// added const qualifier (otherwise compilation fails)
 size_t PSYoungGen::available_to_min_gen() const {
   assert(virtual_space()->committed_size() >= min_gen_size(), "Invariant");
   return virtual_space()->committed_size() - min_gen_size();
@@ -837,6 +842,8 @@ size_t PSYoungGen::available_to_min_gen() const {
 // This method assumes that from-space has live data and that
 // any shrinkage of the young gen is limited by location of
 // from-space.
+// BALLOONING, YI REN
+// added const qualifier (otherwise compilation fails)
 size_t PSYoungGen::available_to_live() const {
   size_t delta_in_survivor = 0;
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
@@ -878,6 +885,8 @@ size_t PSYoungGen::available_to_live() const {
 //      input "bytes"
 //      bytes to the minimum young gen size
 //      bytes to the size currently being used + some small extra
+// BALLOONING, YI REN
+// added const qualifier (otherwise compilation fails)
 size_t PSYoungGen::limit_gen_shrink(size_t bytes) const {
   // Allow shrinkage into the current eden but keep eden large enough
   // to maintain the minimum young gen size

@@ -48,6 +48,8 @@ class PSOldGen : public CHeapObj<mtGC> {
   PSMarkSweepDecorator*    _object_mark_sweep; // The mark sweep view of _object_space
   const char* const        _name;              // Name of this generation.
 
+  // BALLOONING, YI REN
+  // desired balloon size.
   size_t _balloon_size;
 
   // Performance Counters
@@ -115,6 +117,13 @@ class PSOldGen : public CHeapObj<mtGC> {
   void initialize_work(const char* perf_data_name, int level);
 
   MemRegion reserved() const                { return _reserved; }
+
+  // BALLOONING, YI REN
+  // Substract _balloon_size from _max_gen_size, to make adaptive size policy
+  // "believe" there is less usable space. As a result it will shrink the generation
+  // and we get the ballooning effect.
+  // The alignment is important here (wihtout which SIGSEGV may be preoduced)
+  // since the return value is assumed to be aligned elsewhere.
   virtual size_t max_gen_size()             { return align_size_up(MAX2(_max_gen_size - _balloon_size, used_in_bytes()), virtual_space()->alignment()); }
   size_t min_gen_size()                     { return _min_gen_size; }
 
@@ -198,10 +207,16 @@ class PSOldGen : public CHeapObj<mtGC> {
   // Save the tops of all spaces for later use during mangling.
   void record_spaces_top() PRODUCT_RETURN;
 
+  // BALLOONING, YI REN
+  // get _balloon_size.
   size_t balloon_size() { return _balloon_size; };
-  void init_ballon() {set_balloon_size(0); };
+  // set _balloon_size to 0.
+  void init_balloon() {set_balloon_size(0); };
+  // set _balloon_size to bytes.
   void set_balloon_size(size_t bytes) {
+	// _balloon_size can not be greater than max_gen_size
   	size_t new_size = MIN2(bytes, _max_gen_size);
+  	// alignment
   	new_size = align_size_down(new_size, virtual_space()->alignment());
   	_balloon_size = new_size;
 //  	printf("set old balloon size in bytes:%zu\n", _balloon_size);

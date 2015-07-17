@@ -47,6 +47,8 @@ class PSYoungGen : public CHeapObj<mtGC> {
   MutableSpace* _from_space;
   MutableSpace* _to_space;
 
+  // BALLOONING, YI REN
+  // desired balloon size.
   size_t _balloon_size;
 
 
@@ -85,12 +87,18 @@ class PSYoungGen : public CHeapObj<mtGC> {
 
   // Given a desired shrinkage in the size of the young generation,
   // return the actual size available for shrinkage.
+  // BALLOONING, YI REN
+  // added const qualifier (otherwise compilation fails)
   virtual size_t limit_gen_shrink(size_t desired_change) const;
   // returns the number of bytes available from the current size
   // down to the minimum generation size.
+  // BALLOONING, YI REN
+  // added const qualifier (otherwise compilation fails)
   size_t available_to_min_gen() const;
   // Return the number of bytes available for shrinkage considering
   // the location the live data in the generation.
+  // BALLOONING, YI REN
+  // added const qualifier (otherwise compilation fails)
   virtual size_t available_to_live() const;
 
  public:
@@ -118,6 +126,8 @@ class PSYoungGen : public CHeapObj<mtGC> {
   PSVirtualSpace* virtual_space() const { return _virtual_space; }
 
   // For Adaptive size policy
+  // BALLOONING, YI REN
+  // added const qualifier (otherwise compilation fails)
   size_t min_gen_size() const { return _min_gen_size; }
 
   // MarkSweep support
@@ -148,21 +158,47 @@ class PSYoungGen : public CHeapObj<mtGC> {
   size_t free_in_words() const;
 
   // The max this generation can grow to
+  // BALLOONING, YI REN
+  // Substract _balloon_size from virtual_space()->committed_size(),
+  // to make adaptive size policy "believe" there is less usable space.
+  // As a result it will shrink the generation and we get the ballooning effect.
+  // The alignment is important here (wihtout which SIGSEGV may be preoduced)
+  // since the return value is assumed to be aligned elsewhere.
   size_t max_size() const {
+      // BALLOONING, YI REN
+	  // limit_gen_shrink is used by the resizing functions to
+	  // avoid over-shrinking, so I should use it as well.
+	  // Furthermore, if this limit is not forced, the sanity check in
+	  // resize_generation will fail.
 	  // we could call limit_gen_shrink(_balloon_size - uncommitted), but the
 	  // result will be the same due to the MAX2 later.
   	  size_t lower_bound = virtual_space()->committed_size() - limit_gen_shrink(_balloon_size);
   	  size_t ballooned_size = MAX2(_reserved.byte_size() - _balloon_size, lower_bound);
+      // BALLOONING, YI REN
+  	  // alignment
   	  return align_size_up(ballooned_size, virtual_space()->alignment());
   }
 
   // The max this generation can grow to if the boundary between
   // the generations are allowed to move.
+  // BALLOONING, YI REN
+  // Substract _balloon_size from virtual_space()->committed_size(),
+  // to make adaptive size policy "believe" there is less usable space.
+  // As a result it will shrink the generation and we get the ballooning effect.
+  // The alignment is important here (wihtout which SIGSEGV may be preoduced)
+  // since the return value is assumed to be aligned elsewhere.
   size_t gen_size_limit() const {
+      // BALLOONING, YI REN
+	  // limit_gen_shrink is used by the resizing functions to
+	  // avoid over-shrinking, so I should use it as well.
+	  // Furthermore, if this limit is not forced, the sanity check in
+	  // resize_generation will fail.
 	  // we could call limit_gen_shrink(_balloon_size - uncommitted), but the
 	  // result will be the same due to the MAX2 later.
   	  size_t lower_bound = virtual_space()->committed_size() - limit_gen_shrink(_balloon_size);
   	  size_t ballooned_size = MAX2(_max_gen_size - _balloon_size, lower_bound);
+      // BALLOONING, YI REN
+  	  // alignment
   	  return align_size_up(ballooned_size, virtual_space()->alignment());
   }
 
@@ -208,10 +244,16 @@ class PSYoungGen : public CHeapObj<mtGC> {
 
   void record_spaces_top() PRODUCT_RETURN;
 
+  // BALLOONING, YI REN
+  // get _balloon_size
   size_t balloon_size() const { return _balloon_size; };
-  void init_ballon() {set_balloon_size(0); };
+  // set _balloon_size to 0
+  void init_balloon() {set_balloon_size(0); };
+  // set _balloon_size to bytes
   void set_balloon_size(size_t bytes) {
+	// _balloon_size can not be greater than max_gen_size
   	size_t new_size = MIN2(bytes, _max_gen_size);
+  	// alignment
   	new_size = align_size_down(new_size, virtual_space()->alignment());
   	_balloon_size = new_size;
 //  	printf("set young balloon size in bytes:%zu\n", _balloon_size);

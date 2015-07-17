@@ -290,7 +290,14 @@ void PSAdaptiveSizePolicy::compute_generation_free_space(
   clear_generation_free_space_flags();
 
   // Limits on our growth
+  // BALLOONING, YI REN
+  // Before:
 //  size_t promo_limit = (size_t)(max_old_gen_size - avg_old_live()->average());
+  // promo_limit is used later: if desired_promo_size > promo_limit then
+  // desired_promo_size is set to promo_limit.
+  // Due to ballooning, max_old_gen_size may be smaller than
+  // avg_old_live()->average(). We'd better avoid this.
+  // After:
   size_t promo_limit = 0;
   if (max_old_gen_size > avg_old_live()->average()) {
 	  promo_limit = (size_t)(max_old_gen_size - avg_old_live()->average());

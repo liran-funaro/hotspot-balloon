@@ -71,8 +71,11 @@ static void trace_gen_sizes(const char* const str,
 }
 
 jint ParallelScavengeHeap::initialize() {
-  // initialize balloon
-  init_ballon();
+  // BALLOONING, YI REN
+  // initialize the balloon pipes. The pipes are only used during GC, not in
+  // initialization, so we can initialize them whenever we want in
+  // ParallelScavengeHeap::initialize().
+  init_balloon_pipes();
 
   CollectedHeap::pre_initialize();
 
@@ -805,7 +808,13 @@ bool ParallelScavengeHeap::can_elide_initializing_store_barrier(oop new_obj) {
 
 // This method is used by System.gc() and JVMTI.
 void ParallelScavengeHeap::collect(GCCause::Cause cause) {
-  // update balloon size
+  // BALLOONING, YI REN
+  // Updates _balloon_size, young_gen()->_balloon_size and old_gen()->_balloon_size.
+  // Note that the update may change the return value of functions
+  // max_gen_size() and gen_size_limit(). However, a search in the code shows
+  // that these functions are only called in the resize phase of the GC.
+  // Hence it's ok to update balloon at the beginning of collect(cause).
+  // The actual resizing happens in adaptive size policy.
   update_balloon();
   assert(!Heap_lock->owned_by_self(),
     "this thread should not own the Heap_lock");
@@ -1063,6 +1072,9 @@ void ParallelScavengeHeap::gen_mangle_unused_area() {
 }
 #endif
 
+// BALLOONING, YI REN
+// The pipe IO functionality is moved to ParallelScavengeHeap since
+// we want to control the young gen balloon sand old gen balloon altogether.
 long ParallelScavengeHeap::read_ballon_pipe(const char* pipeName) {
 	if(pipeName == NULL) {
 		return -1;
@@ -1106,7 +1118,7 @@ bool ParallelScavengeHeap::write_ballon_pipe(const char* pipeName, size_t newSiz
 	return true;
 }
 
-void ParallelScavengeHeap::init_ballon() {
+void ParallelScavengeHeap::init_balloon_pipes() {
 	set_balloon_size(0);
 	ballon_input_pipe_name = "/tmp/JavaBalloonSizeBytesInput";
 	ballon_output_pipe_name = "/tmp/JavaBalloonSizeBytesOutput";
@@ -1133,8 +1145,15 @@ void ParallelScavengeHeap::update_balloon() {
 	}
 	size_t new_balloon_size = (size_t) read_balloon_size;
 	set_balloon_size(new_balloon_size);
+    // BALLOONING, YI REN
+	// partition the total balloon into young gen balloon and old gen balloon,
+	// according to NewRatio.
+	// NewRatio is a global variable. Its value is 2 by default and can be changed
+	// by -XX:NewRatio=N
 	size_t new_young_balloon_size = (size_t) (new_balloon_size / (1 + NewRatio));
 	size_t new_old_balloon_size = (size_t) ((new_balloon_size * NewRatio) / (1 + NewRatio));
+    // BALLOONING, YI REN
+	// update young gen and old gen balloon size, respectively.
 	young_gen()->set_balloon_size(new_young_balloon_size);
 	old_gen()->set_balloon_size(new_old_balloon_size);
 

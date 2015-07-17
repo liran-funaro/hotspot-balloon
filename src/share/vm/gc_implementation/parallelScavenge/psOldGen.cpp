@@ -55,7 +55,10 @@ PSOldGen::PSOldGen(size_t initial_size,
 
 void PSOldGen::initialize(ReservedSpace rs, size_t alignment,
                           const char* perf_data_name, int level) {
-  init_ballon();
+  // BALLOONING, YI REN
+  // set _balloon_size to 0. This variable is used later in initialization
+  // by max_gen_size(). So we should do it early.
+  init_balloon();
   initialize_virtual_space(rs, alignment);
   initialize_work(perf_data_name, level);
   // The old gen can grow to gen_size_limit().  _reserve reflects only
@@ -404,6 +407,12 @@ void PSOldGen::post_resize() {
     "Sanity");
 }
 
+// BALLOONING, YI REN
+// Substract _balloon_size from _max_gen_size, to make adaptive size policy
+// "believe" there is less usable space. As a result it will shrink the generation
+// and we get the ballooning effect.
+// The alignment is important here (wihtout which SIGSEGV may be preoduced)
+// since the return value is assumed to be aligned elsewhere.
 size_t PSOldGen::gen_size_limit() {
 	return align_size_up(MAX2(_max_gen_size - _balloon_size, used_in_bytes()), virtual_space()->alignment());
 }
