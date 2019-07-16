@@ -25,6 +25,8 @@
 #ifndef SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PARALLELSCAVENGEHEAP_HPP
 #define SHARE_VM_GC_IMPLEMENTATION_PARALLELSCAVENGE_PARALLELSCAVENGEHEAP_HPP
 
+#include <string>
+
 #include "gc_implementation/parallelScavenge/objectStartArray.hpp"
 #include "gc_implementation/parallelScavenge/psGCAdaptivePolicyCounters.hpp"
 #include "gc_implementation/parallelScavenge/psOldGen.hpp"
@@ -304,8 +306,7 @@ CollectorPolicy* collector_policy() const { return (CollectorPolicy*) _collector
 //    printf("set total balloon size in bytes:%zu\n", _balloon_size);
   }
   // input/output pipes' path
-  const char* ballon_input_pipe_name;
-  const char* ballon_output_pipe_name;
+  std::string ballon_input_pipe_name;
   // write current balloon size to output pipe (not used)
   bool write_ballon_pipe(const char* pipeName, size_t newSize);
   // read desired  balloon size from input pipe.

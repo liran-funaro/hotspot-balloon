@@ -22,6 +22,9 @@
  *
  */
 
+#include <iostream>
+#include <sstream>
+
 #include "precompiled.hpp"
 #include "gc_implementation/parallelScavenge/adjoiningGenerations.hpp"
 #include "gc_implementation/parallelScavenge/adjoiningVirtualSpaces.hpp"
@@ -1083,7 +1086,7 @@ long ParallelScavengeHeap::read_ballon_pipe(const char* pipeName) {
 	int pipe = os::open(pipeName, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP);
 
 	if(pipe < 0) {
-		printf( "[Balloon ERROR] Failed to read from pipe: %s\n", pipeName);
+    std::cerr << "[Balloon ERROR] Failed to read from pipe: " << pipeName << std::endl;
 		return -1;
 	}
 
@@ -1106,7 +1109,7 @@ bool ParallelScavengeHeap::write_ballon_pipe(const char* pipeName, size_t newSiz
 	int pipe = os::open(pipeName, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP);
 
 	if(pipe < 0) {
-		printf( "[Balloon ERROR] Failed to write to pipe: %s\n", pipeName);
+    std::cerr << "[Balloon ERROR] Failed to write to pipe: " << pipeName << std::endl;
 		return false;
 	}
 
@@ -1120,25 +1123,24 @@ bool ParallelScavengeHeap::write_ballon_pipe(const char* pipeName, size_t newSiz
 
 void ParallelScavengeHeap::init_balloon_pipes() {
 	set_balloon_size(0);
-	ballon_input_pipe_name = "/tmp/JavaBalloonSizeBytesInput";
-	ballon_output_pipe_name = "/tmp/JavaBalloonSizeBytesOutput";
 
-	unlink(ballon_input_pipe_name);
-	unlink(ballon_output_pipe_name);
+  int pid = os::current_process_id();
+  std::ostringstream stringStream;
+  stringStream << "/tmp/jvm-balloon-size-bytes-" << pid;
+  ballon_input_pipe_name = stringStream.str();
 
-	bool success = write_ballon_pipe(ballon_input_pipe_name, 0);
-	success &=  write_ballon_pipe(ballon_output_pipe_name, 0);
+	unlink(ballon_input_pipe_name.c_str());
+
+	bool success = write_ballon_pipe(ballon_input_pipe_name.c_str(), 0);
 
 	if(!success) {
-		unlink(ballon_input_pipe_name);
-		unlink(ballon_output_pipe_name);
-		ballon_input_pipe_name = NULL;
-		ballon_output_pipe_name = NULL;
+		unlink(ballon_input_pipe_name.c_str());
+		ballon_input_pipe_name = "";
 	}
 }
 
 void ParallelScavengeHeap::update_balloon() {
-	long read_balloon_size = read_ballon_pipe(ballon_input_pipe_name);
+	long read_balloon_size = read_ballon_pipe(ballon_input_pipe_name.c_str());
 
 	if(read_balloon_size < 0) {
 		return;
